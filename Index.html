@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced Beer Tracker Calendar</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.7.0/chart.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+        h1, h2 { text-align: center; }
+        #calendarContainer { overflow-x: auto; }
+        #calendar { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; margin-top: 20px; }
+        .day { border: 1px solid #ccc; padding: 10px; text-align: center; cursor: pointer; }
+        .day.has-beers { background-color: #ffeb3b; }
+        .day.no-alcohol { background-color: #4CAF50; }
+        .day.fourth-day { background-color: #f44336; }
+        .day.selected { border: 2px solid #2196F3; }
+        .day.future { background-color: #e0e0e0; cursor: not-allowed; }
+        .weekday { font-weight: bold; background-color: #f0f0f0; }
+        #controls { display: flex; justify-content: center; align-items: center; margin-top: 20px; }
+        button { font-size: 18px; margin: 0 10px; }
+        #amount2day { font-size: 24px; margin: 0 10px; }
+        #selectedDate { margin-top: 10px; }
+        #chartContainer, #statsContainer { margin-top: 30px; }
+        #stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+        .stat-item { background-color: #f0f0f0; padding: 10px; border-radius: 5px; }
+        @media (max-width: 600px) {
+            .day { padding: 5px; font-size: 0.8em; }
+            #stats { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <h1>Advanced Beer Tracker Calendar</h1>
+    <h2 id="currentMonth"></h2>
+    <div id="calendarContainer">
+        <div id="calendar"></div>
+    </div>
+    <h2 id="selectedDate"></h2>
+    <div id="controls">
+        <button id="minus">-</button>
+        <h2 id="amount2day">0</h2>
+        <button id="plus">+</button>
+    </div>
+    <div id="statsContainer">
+        <h2>Statistics</h2>
+        <div id="stats"></div>
+    </div>
+    <div id="chartContainer">
+        <canvas id="drinkingChart"></canvas>
+    </div>
+
+    <script>
+        const amountDisplay = document.getElementById("amount2day");
+        const minusButton = document.getElementById("minus");
+        const plusButton = document.getElementById("plus");
+        const calendarDiv = document.getElementById("calendar");
+        const selectedDateDisplay = document.getElementById("selectedDate");
+        const statsDiv = document.getElementById("stats");
+        const currentMonthDisplay = document.getElementById("currentMonth");
+        const ctx = document.getElementById('drinkingChart').getContext('2d');
+
+        let currentDate = new Date();
+        let selectedDate = new Date();
+        let currentAmount = 0;
+
+        const weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+        function updateCalendar() {
+            calendarDiv.innerHTML = '';
+            const year = currentDate.getFullYear();
+            const month = currentDate.getMonth();
+            const daysInMonth = new Date(year, month + 1, 0).getDate();
+            const firstDay = new Date(year, month, 1).getDay();
+            const monthName = new Date(year, month, 1).toLocaleString('default', { month: 'long' });
+
+            currentMonthDisplay.textContent = `${monthName} ${year}`;
+
+            // Add weekday headers
+            weekdays.forEach(day => {
+                const dayDiv = document.createElement('div');
+                dayDiv.className = 'day weekday';
+                dayDiv.textContent = day;
+                calendarDiv.appendChild(dayDiv);
+            });
+
+            // Adjust for Monday start
+            const adjustedFirstDay = firstDay === 0 ? 6 : firstDay - 1;
+
+            for (let i = 0; i < adjustedFirstDay; i++) {
+                calendarDiv.appendChild(document.createElement('div'));
+            }
+
+            let drinkingDaysThisWeek = 0;
+            let lastMonday = new Date(year, month, 1 - adjustedFirstDay);
+
+            for (let day = 1; day <= daysInMonth; day++) {
+                const dayDiv = document.createElement('div');
+                dayDiv.className = 'day';
+                const date = new Date(year, month, day);
+                const dateString = `${year}-${month + 1}-${day}`;
+                const beers = localStorage.getItem(dateString);
+                
+                if (date > new Date()) {
+                    dayDiv.classList.add('future');
+                    dayDiv.textContent = day;
+                } else {
+                    if (date.getDay() === 1) {  // Reset count on Mondays
+                        lastMonday = new Date(date);
+                        drinkingDaysThisWeek = 0;
+                    }
+
+                    if (beers) {
+                        const beerCount = parseFloat(beers);
+                        if (beerCount > 0) {
+                            dayDiv.classList.add('has-beers');
+                            dayDiv.textContent = `${day} (${beerCount.toFixed(1)})`;
+                            drinkingDaysThisWeek++;
+                            if (drinkingDaysThisWeek === 4) {
+                                dayDiv.classList.add('fourth-day');
+                            }
+                        } else {
+                            dayDiv.classList.add('no-alcohol');
+                            dayDiv.textContent = day;
+                        }
+                    } else {
+                        dayDiv.classList.add('no-alcohol');
+                        dayDiv.textContent = day;
+                    }
+
+                    dayDiv.addEventListener('click', () => selectDate(new Date(year, month, day)));
+                }
+
+                if (day === selectedDate.getDate() && month === selectedDate.getMonth() && year === selectedDate.getFullYear()) {
+                    dayDiv.classList.add('selected');
+                }
+
+                calendarDiv.appendChild(dayDiv);
+            }
+        }
+
+        function selectDate(date) {
+            if (date > new Date()) return;  // Prevent selecting future dates
+            selectedDate = date;
+            updateCalendar();
+            loadData();
+            updateSelectedDateDisplay();
+            updateChart();
+            updateStats();
+        }
+
+        function updateSelectedDateDisplay() {
+            selectedDateDisplay.textContent = `Selected: ${selectedDate.toDateString()}`;
+        }
+
+        function saveData() {
+            const dateString = `${selectedDate.getFullYear()}-${selectedDate.getMonth() + 1}-${selectedDate.getDate()}`;
+            localStorage.setItem(dateString, currentAmount.toString());
+            updateCalendar();
+            updateChart();
+            updateStats();
+        }
+
+        function loadData() {
+            const dateString = `${selectedDate.getFullYear()}-${selectedDate.getMonth() + 1}-${selectedDate.getDate()}`;
+            const savedAmount = localStorage.getItem(dateString);
+            currentAmount = savedAmount ? parseFloat(savedAmount) : 0;
+            amountDisplay.textContent = currentAmount.toFixed(1);
+        }
+
+        function addAmount() {
+            currentAmount += 0.5;
+            amountDisplay.textContent = currentAmount.toFixed(1);
+            saveData();
+        }
+
+        function subtractAmount() {
+            if (currentAmount >= 0.5) {
+                currentAmount -= 0.5;
+                amountDisplay.textContent = currentAmount.toFixed(1);
+                saveData();
+            }
+        }
+
+        function updateChart() {
+            const today = new Date();
+            const thirtyDaysAgo = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 30);
+            const labels = [];
+            const data = [];
+
+            for (let d = new Date(thirtyDaysAgo); d <= today; d.setDate(d.getDate() + 1)) {
+                const dateString = `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+                labels.push(d.toLocaleDateString());
+                const beers = localStorage.getItem(dateString);
+                data.push(beers ? parseFloat(beers) : 0);
+            }
+
+            new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Beers Consumed',
+                        data: data,
+                        backgroundColor: 'rgba(255, 206, 86, 0.2)',
+                        borderColor: 'rgba(255, 206, 86, 1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    scales: {
+                        y: {
+                            beginAtZero: true
+                        }
+                    },
+                    responsive: true,
+                    maintainAspectRatio: false
+                }
+            });
+        }
+
+        function updateStats() {
+            const today = new Date();
+            const oneWeekAgo = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 7);
+            let weeklyTotal = 0;
+            let longestStreak = 0;
+            let currentStreak = 0;
+
+            for (let d = new Date(oneWeekAgo); d <= today; d.setDate(d.getDate() + 1)) {
+                const dateString = `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+                const beers = localStorage.getItem(dateString);
+                if (beers) {
+                    weeklyTotal += parseFloat(beers);
+                }
+            }
+
+            const weeklyAverage = weeklyTotal / 7;
+
+            // Correct streak calculation
+            for (let d = new Date(); d >= new Date(2000, 0, 1); d.setDate(d.getDate() - 1)) {
+                const dateString = `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+                const beers = localStorage.getItem(dateString);
+                if (!beers || parseFloat(beers) === 0) {
+                    currentStreak++;
+                } else {
+                    break;
+                }
+            }
+
+            // Longest streak calculation
+            let tempStreak = 0;
+            for (let d = new Date(); d >= new Date(2000, 0, 1); d.setDate(d.getDate() - 1)) {
+                const dateString = `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+                const beers = localStorage.getItem(dateString);
+                if (!beers || parseFloat(beers) === 0) {
+                    tempStreak++;
+                    longestStreak = Math.max(longestStreak, tempStreak);
+                } else {
+                    tempStreak = 0;
+                }
+            }
+
+            statsDiv.innerHTML = `
+                <div class="stat-item">Weekly Average: ${weeklyAverage.toFixed(2)} beers/day</div>
+                <div class="stat-item">Current Streak: ${currentStreak} days</div>
+                <div class="stat-item">Longest Streak: ${longestStreak} days</div>
+                <div class="stat-item">Weekly Total: ${weeklyTotal.toFixed(1)} beers</div>
+            `;
+        }
+
+        plusButton.addEventListener('click', addAmount);
+        minusButton.addEventListener('click', subtractAmount);
+
+        updateCalendar();
+        loadData();
+        updateSelectedDateDisplay();
+        updateChart();
+        updateStats();
+    </script>
+</body>
+</html>
